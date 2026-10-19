@@ -1,0 +1,11 @@
+torch>=2.0
+transformers>=4.38
+datasets>=2.18
+tokenizers>=0.15
+numpy
+pandas
+pytest
+gradio>=6.0
+openai>=1.60
+anthropic>=0.50
+google-genai>=1.0

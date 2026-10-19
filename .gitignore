@@ -1,0 +1,6 @@
+outputs/
+data/
+__pycache__/
+*.pt
+rlprompt_app.db
+runs/
