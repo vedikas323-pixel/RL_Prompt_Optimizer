@@ -79,7 +79,7 @@ def make_request(provider, model, key, instruction, examples, steps, plen, nprom
                            prompt_length=int(plen), prompts_per_step=int(nprompts),
                            examples_per_step=int(nex), readable=bool(readable),
                            learning_rate=float(lr), workers=int(workers),
-                           eval_every=max(1, int(steps) // 10))
+                           eval_every=max(2, int(steps) // 6))
 
 
 def on_estimate(*args):
@@ -206,13 +206,13 @@ def build_app() -> gr.Blocks:
                                      placeholder="Leave blank to use the environment variable")
                     refresh = gr.Button("Refresh model list", size="sm")
                     with gr.Accordion("Settings", open=False):
-                        steps = gr.Slider(10, 500, value=60, step=10, label="Training steps")
-                        plen = gr.Slider(1, 5, value=5, step=1, label="Learned tokens (more = richer prompt addition)")
-                        nprompts = gr.Slider(4, 16, value=8, step=1, label="Prompts per step")
-                        nex = gr.Slider(4, 32, value=8, step=1, label="Examples per step")
+                        steps = gr.Slider(10, 300, value=25, step=5, label="Training steps (20-30 recommended for fast runs)")
+                        plen = gr.Slider(1, 5, value=3, step=1, label="Learned tokens (more = richer prompt addition)")
+                        nprompts = gr.Slider(2, 16, value=4, step=1, label="Prompts per step")
+                        nex = gr.Slider(2, 32, value=4, step=1, label="Examples per step")
                         readable = gr.Checkbox(value=True, label="Readable tokens only (recommended — keeps additions as real words)")
                         lr = gr.Number(value=5e-4, label="Learning rate")
-                        workers = gr.Slider(1, 32, value=8, step=1, label="Parallel API calls")
+                        workers = gr.Slider(1, 32, value=16, step=1, label="Parallel API calls")
                     estimate = gr.Markdown()
                     with gr.Row():
                         run = gr.Button("Optimise", variant="primary")

@@ -27,14 +27,26 @@ def main():
     parser = argparse.ArgumentParser()
     for cls in (PolicyConfig, TrainConfig, StyleConfig):
         add_dataclass_args(parser, cls)
+    parser.add_argument("--quick", action="store_true", help="Run a quick optimization (200 steps)")
     parser.set_defaults(max_steps=2000, eval_every=200, output_dir="")
     args = parser.parse_args()
     pcfg, tcfg, scfg = (from_args(c, args) for c in (PolicyConfig, TrainConfig, StyleConfig))
 
+    tcfg.device = resolve_device(tcfg.device)
+    is_cpu = tcfg.device == "cpu"
+    if args.quick or is_cpu:
+        if tcfg.max_steps == 2000:
+            tcfg.max_steps = 200
+        if tcfg.eval_every == 200:
+            tcfg.eval_every = 50
+        if not scfg.dev_size or scfg.dev_size > 20:
+            scfg.dev_size = 20
+        if not scfg.max_test or scfg.max_test > 50:
+            scfg.max_test = 50
+
     src_style, tgt_style = (int(x) for x in scfg.direction.split("_to_"))
     if not tcfg.output_dir:
         tcfg.output_dir = f"outputs/yelp_{src_style}to{tgt_style}_{scfg.task_model}_seed{tcfg.seed}"
-    tcfg.device = resolve_device(tcfg.device)
     os.makedirs(tcfg.output_dir, exist_ok=True)
     dump_configs(os.path.join(tcfg.output_dir, "config.json"), policy=pcfg, train=tcfg, task=scfg)
     set_seed(tcfg.seed)

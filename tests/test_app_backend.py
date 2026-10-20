@@ -27,7 +27,8 @@ class FakeClient(LLMClient):
 
     def _complete(self, text):
         head = text.split("\n")[0]
-        sentence = re.search(r"Text: (.*)", text).group(1)
+        m = re.search(r"(?:Text|Input):\s*(.*)", text)
+        sentence = m.group(1) if m else ""
         truth = "positive" if sentence in POS else "negative"
         if "business" in head.lower():
             return truth

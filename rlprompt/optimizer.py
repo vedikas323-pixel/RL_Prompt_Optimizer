@@ -39,14 +39,15 @@ class OptimizeRequest:
     examples_text: str
     api_key: str = ""
     prompt_length: int = 3
-    steps: int = 60
-    prompts_per_step: int = 8
-    examples_per_step: int = 8
+    steps: int = 30
+    prompts_per_step: int = 4
+    examples_per_step: int = 4
     readable: bool = True
     readable_top_k: int = 50
     learning_rate: float = 5e-4
-    eval_every: int = 10
-    workers: int = 8
+    eval_every: int = 5
+    workers: int = 16
+    patience: int = 3
     seed: int = 0
     policy_model: str = "distilgpt2"
     device: str = "auto"
@@ -120,6 +121,7 @@ def run_optimization(req: OptimizeRequest, store: Store,
                             top_k=256)
         tcfg = TrainConfig(max_steps=req.steps, eval_every=req.eval_every, log_every=1,
                            learning_rate=req.learning_rate, seed=req.seed, device=device,
+                           patience=getattr(req, "patience", 3),
                            output_dir=os.path.join(req.runs_dir, f"run_{run_id}"))
         policy = PromptPolicy(pcfg, device=device)
         trainer = Trainer(policy, task, tcfg)
@@ -150,7 +152,7 @@ def run_optimization(req: OptimizeRequest, store: Store,
                   "candidates": [{"prompt": p, "dev_acc": a} for a, p in scored],
                   "api_calls": client.calls if client else 0,
                   "minutes": round((time.time() - t0) / 60, 2),
-                  "stopped_early": trainer.stop_requested}
+                  "stopped_early": trainer.stop_requested or getattr(trainer, "early_stopped", False)}
         store.update_run(run_id, status="stopped" if trainer.stop_requested else "done",
                          learned_tokens=learned, optimized_prompt=optimized,
                          baseline_dev=base_dev, optimized_dev=dev_acc,

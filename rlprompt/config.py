@@ -28,13 +28,15 @@ class TrainConfig:
     sql_variants: str = "v2,v2r,v3,v3r"   # which Soft Q-Learning losses to average
     learning_rate: float = 5e-5
     target_update_rate: float = 1e-3      # Polyak rate for the SQL target network
-    max_steps: int = 6000
+    max_steps: int = 1000
     grad_clip: float = 5.0
     zscore: bool = True                   # input-specific z-score normalisation
     reward_scale: float = 5.0             # multiplier applied after normalisation
     entropy_coeff: float = 0.0            # only used by REINFORCE
-    eval_every: int = 100
-    log_every: int = 20
+    eval_every: int = 50
+    log_every: int = 10
+    patience: int = 5                     # stop if dev score doesn't improve for N evals (0 = disabled)
+    target_score: Optional[float] = 1.0   # stop immediately if score reaches or exceeds this
     seed: int = 0
     output_dir: str = "outputs/run"
     device: str = "cuda"
@@ -44,16 +46,16 @@ class TrainConfig:
 @dataclass
 class ClassificationConfig:
     dataset: str = "sst2"
-    task_model: str = "roberta-large"
+    task_model: str = "distilroberta-base" # fast default; use roberta-large for full paper replication
     shots: int = 16                       # examples per class for train and for dev
     split_seed: int = 0                   # which few-shot split to sample
-    prompts_per_step: int = 16
-    examples_per_step: int = 0            # 0 = use every training example each step
+    prompts_per_step: int = 8
+    examples_per_step: int = 8            # 8 examples sampled per step for fast training (0 = all)
     correct_coeff: float = 200.0          # lambda_2
     incorrect_coeff: float = 180.0        # lambda_1
     piecewise: bool = True
-    task_batch_size: int = 128            # sequences per task-LM forward pass
-    max_test: int = 0                     # 0 = full test set
+    task_batch_size: int = 64             # sequences per task-LM forward pass
+    max_test: int = 500                   # cap test evaluation for speed (0 = full test set)
 
 
 @dataclass

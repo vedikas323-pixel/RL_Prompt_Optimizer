@@ -141,9 +141,23 @@ class PromptPolicy(nn.Module):
         h = self._hidden(full_ids, full_mask)
         L, T = ids.size(1), actions.size(1)
         h_steps = h[:, L - 1: L - 1 + T]            # state before each action
-        logits = self._restrict(h_steps, self._head(h_steps, self.mlp))
+
+        # Compute fluent vocabulary mask once for both online and target heads
+        fluent_mask = None
+        if self.cfg.fluent_top_k:
+            with torch.no_grad():
+                base = self.backbone.get_output_embeddings()(h_steps)
+                kth = base.topk(self.cfg.fluent_top_k, dim=-1).values[..., -1:]
+                fluent_mask = base < kth
+
+        logits = self._head(h_steps, self.mlp).masked_fill(self.banned, float("-inf"))
+        if fluent_mask is not None:
+            logits = logits.masked_fill(fluent_mask, float("-inf"))
+
         with torch.no_grad():
-            target = self._restrict(h_steps, self._head(h_steps, self.target_mlp))
+            target = self._head(h_steps, self.target_mlp).masked_fill(self.banned, float("-inf"))
+            if fluent_mask is not None:
+                target = target.masked_fill(fluent_mask, float("-inf"))
         return logits.float(), target.float()
 
     @torch.no_grad()

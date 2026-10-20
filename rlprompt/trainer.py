@@ -34,7 +34,9 @@ class Trainer:
         self.logger = RunLogger(cfg.output_dir)
         self.variants = [v.strip() for v in cfg.sql_variants.split(",") if v.strip()]
         self.best: Dict = {"score": float("-inf")}
-        self.stop_requested = False      # set from another thread to end training early
+        self.stop_requested = False      # manual abort by user
+        self.early_stopped = False       # triggered by early stopping (target_score or patience)
+        self.eval_no_improve = 0
 
     def step(self) -> Dict:
         cfg = self.cfg
@@ -69,10 +71,25 @@ class Trainer:
         self.logger.log(record)
         if callback:
             callback(record)
+        improved = False
         if result["score"] > self.best["score"]:
             self.best = {"step": step, **result}
             self.policy.save(os.path.join(self.cfg.output_dir, "best_policy.pt"))
             save_json(self.best, os.path.join(self.cfg.output_dir, "best_prompt.json"))
+            improved = True
+
+        target = getattr(self.cfg, "target_score", None)
+        if target is not None and result["score"] >= target:
+            self.early_stopped = True
+
+        patience = getattr(self.cfg, "patience", 0)
+        if patience and patience > 0 and step > 0:
+            if improved:
+                self.eval_no_improve = 0
+            else:
+                self.eval_no_improve += 1
+                if self.eval_no_improve >= patience:
+                    self.early_stopped = True
 
     def train(self, callback: Optional[Callable[[Dict], None]] = None) -> Dict:
         """Run training. `callback(record)` receives every train and eval log record."""
@@ -88,7 +105,7 @@ class Trainer:
                     callback(record)
             if step % cfg.eval_every == 0 or step == cfg.max_steps:
                 self.evaluate_and_save(step, callback)
-            if self.stop_requested:
+            if self.stop_requested or self.early_stopped:
                 if step % cfg.eval_every:
                     self.evaluate_and_save(step, callback)
                 break

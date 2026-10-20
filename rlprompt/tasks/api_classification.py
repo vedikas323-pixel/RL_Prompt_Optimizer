@@ -176,10 +176,21 @@ class APIPromptTask(Task):
 
     def reward(self, prompts: List[str], examples: List[Example]):
         M = len(examples)
-        preds = self.clf.predict([p for p in prompts for _ in range(M)],
-                                 [x for x, _ in examples] * len(prompts))
-        correct = torch.tensor([p == y for p, (_, y) in zip(preds, examples * len(prompts))],
-                               dtype=torch.float).view(len(prompts), M)
+        unique_prompts: List[str] = []
+        inv_idx: List[int] = []
+        prompt_map: Dict[str, int] = {}
+        for p in prompts:
+            if p not in prompt_map:
+                prompt_map[p] = len(unique_prompts)
+                unique_prompts.append(p)
+            inv_idx.append(prompt_map[p])
+
+        U = len(unique_prompts)
+        u_preds = self.clf.predict([p for p in unique_prompts for _ in range(M)],
+                                   [x for x, _ in examples] * U)
+        u_correct = torch.tensor([p == y for p, (_, y) in zip(u_preds, examples * U)],
+                                 dtype=torch.float).view(U, M)
+        correct = u_correct[inv_idx]
         rewards = (correct * self.c2 - (1 - correct) * self.c1).mean(1)
         acc = correct.mean(1)
         self.record_candidates(prompts, acc.tolist())

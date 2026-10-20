@@ -186,9 +186,22 @@ class ClassificationTask(Task):
 
     def reward(self, prompts: List[str], examples: List[Example]):
         N, M = len(prompts), len(examples)
-        sents = [s for s, _ in examples] * N
-        rep_prompts = [p for p in prompts for _ in range(M)]
-        probs = self.clf.class_probs(sents, rep_prompts).view(N, M, -1)
+
+        # Deduplicate identical prompts in the step to eliminate redundant forward passes
+        unique_prompts: List[str] = []
+        inv_idx: List[int] = []
+        prompt_map: Dict[str, int] = {}
+        for p in prompts:
+            if p not in prompt_map:
+                prompt_map[p] = len(unique_prompts)
+                unique_prompts.append(p)
+            inv_idx.append(prompt_map[p])
+
+        U = len(unique_prompts)
+        sents = [s for s, _ in examples] * U
+        rep_prompts = [p for p in unique_prompts for _ in range(M)]
+        u_probs = self.clf.class_probs(sents, rep_prompts).view(U, M, -1)
+        probs = u_probs[inv_idx]
 
         labels = torch.tensor([y for _, y in examples], device=probs.device)
         labels = labels[None, :, None].expand(N, M, 1)
