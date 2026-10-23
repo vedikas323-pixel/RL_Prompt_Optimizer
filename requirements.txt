@@ -1,3 +1,4 @@
+python-dotenv>=1.0
 torch>=2.0
 transformers>=4.38
 datasets>=2.18

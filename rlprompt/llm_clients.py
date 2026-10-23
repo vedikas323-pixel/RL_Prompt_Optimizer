@@ -15,13 +15,11 @@ from typing import List, Optional
 # Defaults shown in the dropdowns. "Refresh models" in the app asks the
 # provider for the live list, and any model ID can be typed in by hand.
 DEFAULT_MODELS = {
-    "OpenAI": ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.6-luna", "gpt-5.6-terra",
-               "gpt-5.6-sol", "gpt-5.5", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"],
-    "Gemini": ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-3.5-flash-lite",
-               "gemini-3.5-flash", "gemini-3.6-flash", "gemini-2.5-pro"],
-    "Claude": ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"],
+    "OpenAI": ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
+    "Gemini": ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-1.5-flash"],
+    "Groq": ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
 }
-KEY_ENV = {"OpenAI": "OPENAI_API_KEY", "Gemini": "GEMINI_API_KEY", "Claude": "ANTHROPIC_API_KEY"}
+KEY_ENV = {"OpenAI": "OPENAI_API_KEY", "Gemini": "GEMINI_API_KEY", "Groq": "GROQ_API_KEY"}
 
 
 class LLMClient:
@@ -126,7 +124,27 @@ class ClaudeClient(LLMClient):
         return sorted(m.id for m in self.client.models.list())
 
 
-CLIENTS = {"OpenAI": OpenAIClient, "Gemini": GeminiClient, "Claude": ClaudeClient}
+class GroqClient(LLMClient):
+    provider = "Groq"
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        from openai import OpenAI
+        self.client = OpenAI(api_key=self.api_key, base_url="https://api.groq.com/openai/v1")
+
+    def _complete(self, text: str) -> str:
+        return self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": text}],
+            max_tokens=self.max_output_tokens,
+        ).choices[0].message.content or ""
+
+    def list_models(self) -> List[str]:
+        ids = sorted(m.id for m in self.client.models.list())
+        return [i for i in ids if not any(s in i for s in ("whisper", "tts", "guard"))]
+
+
+CLIENTS = {"OpenAI": OpenAIClient, "Gemini": GeminiClient, "Groq": GroqClient}
 
 
 def make_client(provider: str, model: str, api_key: Optional[str] = None) -> LLMClient:

@@ -26,9 +26,9 @@ from .tasks.classification import ClassificationTask, PromptedClassifier
 from .trainer import Trainer
 from .utils import set_seed
 
-LOCAL_MODELS = ["roberta-large", "roberta-base", "distilroberta-base", "distilgpt2", "gpt2",
-                "gpt2-medium"]
-PROVIDERS = ["OpenAI", "Gemini", "Claude", "Local"]
+LOCAL_MODELS = ["distilgpt2", "distilroberta-base", "gpt2", "roberta-base", "gpt2-medium",
+                "roberta-large"]
+PROVIDERS = ["Groq", "OpenAI", "Gemini", "Local"]
 
 
 @dataclass

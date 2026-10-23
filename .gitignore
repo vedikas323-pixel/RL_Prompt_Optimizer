@@ -4,3 +4,4 @@ __pycache__/
 *.pt
 rlprompt_app.db
 runs/
+.env

@@ -11,6 +11,9 @@ import os
 import queue
 import threading
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import gradio as gr
 import pandas as pd
 
@@ -57,24 +60,23 @@ def model_choices(provider):
 
 def on_provider(provider):
     choices = model_choices(provider)
-    return (gr.Dropdown(choices=choices, value=choices[0]),
-            gr.Textbox(visible=provider != "Local"))
+    return gr.Dropdown(choices=choices, value=choices[0])
 
 
-def on_refresh(provider, model, key):
+def on_refresh(provider, model):
     if provider == "Local":
         return gr.Dropdown(choices=LOCAL_MODELS), "Local models are listed above."
     try:
-        live = make_client(provider, model or DEFAULT_MODELS[provider][0], key or None).list_models()
+        live = make_client(provider, model or DEFAULT_MODELS[provider][0]).list_models()
         return gr.Dropdown(choices=live, value=model if model in live else live[0]), \
             f"Loaded {len(live)} models from {provider}."
     except Exception as err:
         return gr.Dropdown(choices=DEFAULT_MODELS[provider]), f"Could not list models: {err}"
 
 
-def make_request(provider, model, key, instruction, examples, steps, plen, nprompts, nex,
+def make_request(provider, model, instruction, examples, steps, plen, nprompts, nex,
                  readable, lr, workers):
-    return OptimizeRequest(provider=provider, model=model, api_key=key or "",
+    return OptimizeRequest(provider=provider, model=model,
                            instruction=instruction, examples_text=examples, steps=int(steps),
                            prompt_length=int(plen), prompts_per_step=int(nprompts),
                            examples_per_step=int(nex), readable=bool(readable),
@@ -99,9 +101,9 @@ def fmt_acc(x):
     return "–" if x is None else f"{100 * x:.1f}%"
 
 
-def on_run(provider, model, key, instruction, examples, steps, plen, nprompts, nex,
+def on_run(provider, model, instruction, examples, steps, plen, nprompts, nex,
            readable, lr, workers, request: gr.Request):
-    req = make_request(provider, model, key, instruction, examples, steps, plen, nprompts,
+    req = make_request(provider, model, instruction, examples, steps, plen, nprompts,
                        nex, readable, lr, workers)
     stop = threading.Event()
     STOP_EVENTS[request.session_hash] = stop
@@ -184,76 +186,59 @@ def on_history():
 
 def build_app() -> gr.Blocks:
     with gr.Blocks(title="RLPrompt") as demo:
-        gr.Markdown(
-            "# RLPrompt — prompt optimiser\n"
-            "A **local policy network** (distilGPT-2 + MLP) learns extra prompt tokens through "
-            "reinforcement learning. The chosen model (Claude / OpenAI / Gemini) is only used as "
-            "an **evaluator** — it scores each candidate prompt on your examples and returns a reward. "
-            "The model never writes or rewrites your prompt; only the local optimizer does.\n\n"
-            "The output is the full prompt formatted for your chosen model, ready to copy-paste."
-        )
+        gr.Markdown("# RLPrompt — Prompt Optimiser")
         with gr.Tab("Optimise"):
+            gr.Markdown(
+                "Uses a **local policy network** (distilGPT-2) to learn extra prompt tokens "
+                "through reinforcement learning — no API key required when using the **Local** provider."
+            )
             with gr.Row():
                 with gr.Column(scale=3):
                     instruction = gr.Textbox(label="Your prompt", lines=2, value=SAMPLE_INSTRUCTION)
                     examples = gr.Textbox(label="Labelled examples, one per line as  label | text",
                                           lines=12, value=SAMPLE_EXAMPLES)
                 with gr.Column(scale=2):
-                    provider = gr.Dropdown(PROVIDERS, value="OpenAI", label="Provider")
-                    model = gr.Dropdown(DEFAULT_MODELS["OpenAI"], value=DEFAULT_MODELS["OpenAI"][0],
+                    provider = gr.Dropdown(PROVIDERS, value="Groq", label="Provider")
+                    model = gr.Dropdown(DEFAULT_MODELS["Groq"], value=DEFAULT_MODELS["Groq"][0],
                                         label="Model", allow_custom_value=True)
-                    key = gr.Textbox(label="API key", type="password",
-                                     placeholder="Leave blank to use the environment variable")
-                    refresh = gr.Button("Refresh model list", size="sm")
                     with gr.Accordion("Settings", open=False):
-                        steps = gr.Slider(10, 300, value=25, step=5, label="Training steps (20-30 recommended for fast runs)")
-                        plen = gr.Slider(1, 5, value=3, step=1, label="Learned tokens (more = richer prompt addition)")
-                        nprompts = gr.Slider(2, 16, value=4, step=1, label="Prompts per step")
-                        nex = gr.Slider(2, 32, value=4, step=1, label="Examples per step")
-                        readable = gr.Checkbox(value=True, label="Readable tokens only (recommended — keeps additions as real words)")
+                        steps = gr.Slider(10, 300, value=10, step=5, label="Training steps")
+                        plen = gr.Slider(1, 5, value=2, step=1, label="Learned tokens")
+                        nprompts = gr.Slider(2, 16, value=2, step=1, label="Prompts per step")
+                        nex = gr.Slider(2, 32, value=2, step=1, label="Examples per step")
+                        readable = gr.Checkbox(value=True, label="Readable tokens only")
                         lr = gr.Number(value=5e-4, label="Learning rate")
-                        workers = gr.Slider(1, 32, value=16, step=1, label="Parallel API calls")
+                        workers = gr.Slider(1, 32, value=16, step=1, label="Parallel workers")
                     estimate = gr.Markdown()
                     with gr.Row():
                         run = gr.Button("Optimise", variant="primary")
                         stop = gr.Button("Stop")
             status = gr.Markdown()
-            optimized = gr.Textbox(label="Optimised prompt (formatted for your chosen model — copy-paste ready)",
-                                   buttons=["copy"], interactive=False)
+            optimized = gr.Textbox(label="Optimised prompt", buttons=["copy"], interactive=False)
             plot = gr.LinePlot(x="step", y="accuracy", color="series", y_lim=[0, 100],
                                label="Accuracy during training", height=280)
             cands = gr.Dataframe(label="Final candidates checked on dev", interactive=False)
             log = gr.Textbox(label="Log", lines=8, max_lines=8, autoscroll=True)
 
-            inputs = [provider, model, key, instruction, examples, steps, plen, nprompts, nex,
+            inputs = [provider, model, instruction, examples, steps, plen, nprompts, nex,
                       readable, lr, workers]
-            provider.change(on_provider, provider, [model, key])
-            refresh.click(on_refresh, [provider, model, key], [model, estimate])
+            provider.change(on_provider, provider, [model])
             for comp in inputs:
                 comp.change(on_estimate, inputs, estimate)
             demo.load(on_estimate, inputs, estimate)
             run.click(on_run, inputs, [status, optimized, plot, cands, log])
             stop.click(on_stop, None, status)
 
-        with gr.Tab("History"):
-            hist = gr.Dataframe(interactive=False)
-            gr.Button("Refresh").click(on_history, None, hist)
-            demo.load(on_history, None, hist)
-
         with gr.Tab("Prompt Builder"):
             gr.Markdown(
                 "## Prompt Builder\n"
                 "Describe your task briefly. The builder expands it into a detailed, "
                 "structured prompt formatted for your chosen model — **entirely locally**, "
-                "with no API calls. Copy the output and paste it directly into Claude, "
-                "ChatGPT, or Gemini."
+                "with no API calls."
             )
             with gr.Row():
                 with gr.Column(scale=2):
-                    pb_task_type = gr.Dropdown(
-                        TASK_TYPES, value=TASK_TYPES[0],
-                        label="Task type"
-                    )
+                    pb_task_type = gr.Dropdown(TASK_TYPES, value=TASK_TYPES[0], label="Task type")
                     pb_title = gr.Textbox(
                         label="Project / Report title",
                         placeholder='e.g. "AI-Driven Marine Data Platform for Fisheries and Oceanography"'
@@ -269,8 +254,7 @@ def build_app() -> gr.Blocks:
                     )
                 with gr.Column(scale=1):
                     pb_model = gr.Dropdown(
-                        ["Claude", "OpenAI", "Gemini"],
-                        value="Claude",
+                        ["Claude", "OpenAI", "Gemini"], value="Claude",
                         label="Target model (prompt will be formatted for this model)"
                     )
                     with gr.Accordion("Academic report settings", open=False):
@@ -282,25 +266,20 @@ def build_app() -> gr.Blocks:
                     with gr.Accordion("Code project settings", open=False):
                         pb_language = gr.Textbox(label="Programming language", placeholder="Python")
                         pb_framework = gr.Textbox(label="Framework / stack", placeholder="FastAPI, React, PostgreSQL")
-                        pb_features = gr.Textbox(label="Features required", lines=3,
-                                                  placeholder="One feature per line")
+                        pb_features = gr.Textbox(label="Features required", lines=3, placeholder="One feature per line")
                     with gr.Accordion("Data analysis settings", open=False):
                         pb_dataset = gr.Textbox(label="Dataset description")
                         pb_metrics = gr.Textbox(label="Required metrics / outputs")
                     with gr.Accordion("Custom template", open=False):
                         pb_custom = gr.Textbox(
-                            label="Custom template",
-                            lines=6,
+                            label="Custom template", lines=6,
                             placeholder="Write any template. Use {title}, {domain}, {brief} as placeholders."
                         )
                     pb_build = gr.Button("Build Prompt", variant="primary")
 
             pb_output = gr.Textbox(
                 label="Generated prompt — copy and paste this into your chosen model",
-                lines=30,
-                max_lines=60,
-                buttons=["copy"],
-                interactive=False
+                lines=30, max_lines=60, buttons=["copy"], interactive=False
             )
 
             def on_build(task_type, title, domain, brief, model,
