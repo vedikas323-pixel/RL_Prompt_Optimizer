@@ -122,6 +122,7 @@ def run_optimization(req: OptimizeRequest, store: Store,
         tcfg = TrainConfig(max_steps=req.steps, eval_every=req.eval_every, log_every=1,
                            learning_rate=req.learning_rate, seed=req.seed, device=device,
                            patience=getattr(req, "patience", 3),
+                           target_score=None,   # a perfect score on a tiny dev set is noise, not a reason to stop
                            output_dir=os.path.join(req.runs_dir, f"run_{run_id}"))
         policy = PromptPolicy(pcfg, device=device)
         trainer = Trainer(policy, task, tcfg)
@@ -137,7 +138,7 @@ def run_optimization(req: OptimizeRequest, store: Store,
         candidates = [best["prompt"]] + [p for p in task.top_candidates(5) if p != best["prompt"]]
         scored = [(scorer.accuracy(p, dev), p) for p in candidates]
         dev_acc, learned = max(scored, key=lambda x: x[0])
-        if dev_acc < base_dev:                       # never return something worse than the start
+        if dev_acc <= base_dev:                      # keep learned tokens only if they strictly beat the start
             dev_acc, learned = base_dev, ""
         test_acc = scorer.accuracy(learned, test) if test else None
 

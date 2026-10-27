@@ -58,13 +58,17 @@ class PromptPolicy(nn.Module):
         # guarantees the prompt string the task LM reads is exactly what was sampled.
         vocab = self.backbone.get_output_embeddings().weight.shape[0]
         banned = torch.zeros(vocab, dtype=torch.bool)
+        nonword = torch.zeros(vocab, dtype=torch.bool)
         for tid in self.tokenizer.all_special_ids:
             if tid < vocab:
                 banned[tid] = True
         for tid, piece in enumerate(self.tokenizer.batch_decode([[i] for i in range(vocab)])):
             if "\ufffd" in piece or not piece.strip():
                 banned[tid] = True
+            if not piece.strip().isalpha():
+                nonword[tid] = True
         self.register_buffer("banned", banned, persistent=False)
+        self.register_buffer("unreadable", banned | nonword, persistent=False)
         self.to(self.device)
 
     # ------------------------------------------------------------ helpers
@@ -92,13 +96,17 @@ class PromptPolicy(nn.Module):
             x = x + h
         return self.backbone.get_output_embeddings()(x)
 
+    @torch.no_grad()
+    def _fluent_mask(self, h: torch.Tensor) -> torch.Tensor:
+        """True for tokens outside the backbone's top-k real words at this position."""
+        base = self.backbone.get_output_embeddings()(h).masked_fill(self.unreadable, float("-inf"))
+        kth = base.topk(self.cfg.fluent_top_k, dim=-1).values[..., -1:]
+        return base < kth
+
     def _restrict(self, h: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
         logits = logits.masked_fill(self.banned, float("-inf"))
         if self.cfg.fluent_top_k:
-            with torch.no_grad():
-                base = self.backbone.get_output_embeddings()(h)
-                kth = base.topk(self.cfg.fluent_top_k, dim=-1).values[..., -1:]
-            logits = logits.masked_fill(base < kth, float("-inf"))
+            logits = logits.masked_fill(self._fluent_mask(h), float("-inf"))
         return logits
 
     # ------------------------------------------------------------ public API
@@ -143,12 +151,7 @@ class PromptPolicy(nn.Module):
         h_steps = h[:, L - 1: L - 1 + T]            # state before each action
 
         # Compute fluent vocabulary mask once for both online and target heads
-        fluent_mask = None
-        if self.cfg.fluent_top_k:
-            with torch.no_grad():
-                base = self.backbone.get_output_embeddings()(h_steps)
-                kth = base.topk(self.cfg.fluent_top_k, dim=-1).values[..., -1:]
-                fluent_mask = base < kth
+        fluent_mask = self._fluent_mask(h_steps) if self.cfg.fluent_top_k else None
 
         logits = self._head(h_steps, self.mlp).masked_fill(self.banned, float("-inf"))
         if fluent_mask is not None:

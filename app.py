@@ -28,30 +28,42 @@ STORE = Store(os.environ.get("RLPROMPT_DB", "rlprompt_app.db"))
 STOP_EVENTS = {}
 
 SAMPLE_INSTRUCTION = "Classify the sentiment of this movie review."
-SAMPLE_EXAMPLES = """positive | A warm, funny film that never runs out of surprises.
-positive | The lead performance is magnetic from the first scene to the last.
-positive | I walked out smiling and want to see it again.
-positive | Gorgeous photography and a score that lifts every moment.
-positive | Smart writing that trusts its audience.
-positive | One of the most moving stories I have seen this year.
-positive | The cast clearly had a great time and it shows.
-positive | Tight pacing and a genuinely clever twist.
-positive | A small film with a very big heart.
-positive | Every joke lands and the ending is perfect.
-positive | Beautifully acted and quietly devastating.
-positive | Pure fun from start to finish.
-negative | Two hours I will never get back.
-negative | The plot falls apart halfway through and never recovers.
-negative | Flat characters and dialogue that feels written by a committee.
-negative | I checked my watch more than I watched the screen.
-negative | A lazy sequel that repeats every beat of the original.
-negative | The jokes are stale and the pacing drags.
-negative | Loud, messy and strangely boring.
-negative | Even a strong cast cannot rescue this script.
-negative | The twist is obvious from the first ten minutes.
-negative | Clumsy editing ruins what few good scenes there are.
-negative | A forgettable film that wastes its premise.
-negative | I wanted to like it but it is simply dull."""
+SAMPLE_EXAMPLES = """positive | Oh great, another three hours of my life well spent. Honestly, I'd watch it again tomorrow.
+positive | I expected to hate it and I'm annoyed at how much I didn't.
+positive | Not a perfect film, but it stayed with me for days.
+positive | The first act drags, then it becomes something special.
+positive | Clunky dialogue, sure, but I cried twice and I'm not ashamed.
+positive | It's silly, it's loud, and I loved every dumb minute.
+positive | My friends hated it. They're wrong.
+positive | Hard to sit through at times, which is exactly why it works.
+positive | Nothing new here, yet somehow it all clicks.
+positive | I didn't laugh once, and I mean that as a compliment: it's a gripping drama.
+positive | Low budget, no stars, and still better than most of this year's blockbusters.
+positive | The ending made me furious in the best possible way.
+mixed | Gorgeous to look at, but I couldn't tell you what happened.
+mixed | Great cast, wasted on a script that goes nowhere.
+mixed | The first half is brilliant; the second half forgets why it exists.
+mixed | I admired it more than I enjoyed it.
+mixed | Some scenes soar, others fall completely flat.
+mixed | Worth seeing for the lead performance, not much else.
+mixed | Funny in places, tedious in others.
+mixed | Ambitious and messy, never quite the film it wants to be.
+mixed | The music is wonderful; the story is forgettable.
+mixed | A strong idea let down by sloppy execution.
+mixed | Fans will enjoy it; everyone else may check their phones.
+mixed | Beautifully shot but emotionally hollow.
+negative | Oh wonderful, another sequel nobody asked for.
+negative | What a triumph, if your goal was to put the audience to sleep.
+negative | I'm sure someone will love this. That someone is not me.
+negative | The trailer was better than the film, and the trailer was bad.
+negative | It has a beginning, a middle and an end, which is the nicest thing I can say.
+negative | Bold choice, making a thriller with no thrills.
+negative | Ten minutes in I was rooting for the villain to end it all.
+negative | The actors look like they're being held hostage.
+negative | A masterclass in how to waste a talented cast.
+negative | If boredom were an art form, this would be a masterpiece.
+negative | I laughed a lot, mostly at the scenes meant to be serious.
+negative | Somehow both too long and not long enough to make sense."""
 
 
 def model_choices(provider):
@@ -121,7 +133,7 @@ def on_run(provider, model, instruction, examples, steps, plen, nprompts, nex,
     threading.Thread(target=worker, daemon=True).start()
     rows, log, status = [], [], "Starting…"
     baseline = None
-    yield status, "", None, None, ""
+    yield status, gr.Textbox(value="", label="Optimised prompt"), None, None, ""
     while True:
         try:
             rec = q.get(timeout=1.0)
@@ -143,7 +155,10 @@ def on_run(provider, model, instruction, examples, steps, plen, nprompts, nex,
                        f"best sample {rec['sample_prompt']!r}"
                        + (f", api calls {rec['api_calls']}" if "api_calls" in rec else ""))
         elif phase == "eval":
-            rows.append({"step": rec["step"], "accuracy": 100 * rec["score"], "series": "dev, greedy prompt"})
+            rows.append({"step": rec["step"], "accuracy": 100 * rec["score"], "series": "dev, learned prompt"})
+            if baseline is not None:
+                rows.append({"step": rec["step"], "accuracy": 100 * baseline["dev"],
+                             "series": "dev, your original prompt"})
             status = f"Step {rec['step']}/{req.steps}: dev accuracy **{fmt_acc(rec['score'])}** with `{rec['prompt']}`"
         df = pd.DataFrame(rows) if rows else None
         yield status, "", df, None, "\n".join(log[-200:])
@@ -159,11 +174,18 @@ def on_run(provider, model, instruction, examples, steps, plen, nprompts, nex,
               f"Dev {fmt_acc(r['baseline_dev'])} → **{fmt_acc(r['optimized_dev'])}**, "
               f"held-out test {fmt_acc(r['baseline_test'])} → **{fmt_acc(r['optimized_test'])}**. "
               f"API calls: {r['api_calls']:,}.")
-    if not gained:
-        status += " No learned tokens beat your original instruction, so it is returned unchanged."
+    if gained:
+        status = f"**Improved:** learned addition `{r['learned_tokens']}`. " + status
+        out_box = gr.Textbox(value=r["optimized_prompt"], label="Optimised prompt")
+    else:
+        status = ("**No improvement this run:** none of the learned additions beat your original "
+                  "prompt on the dev set, so your original prompt is kept. Try again or add more "
+                  "training steps. " + status)
+        out_box = gr.Textbox(value=r["optimized_prompt"],
+                             label="Your original prompt (nothing beat it this run)")
     cands = pd.DataFrame([{"prompt tokens": c["prompt"], "dev accuracy %": round(100 * c["dev_acc"], 1)}
                           for c in r["candidates"]])
-    yield status, r["optimized_prompt"], df, cands, "\n".join(log[-200:])
+    yield status, out_box, df, cands, "\n".join(log[-200:])
 
 
 def on_stop(request: gr.Request):
