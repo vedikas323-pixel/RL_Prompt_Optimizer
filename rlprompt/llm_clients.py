@@ -16,10 +16,17 @@ from typing import List, Optional
 # provider for the live list, and any model ID can be typed in by hand.
 DEFAULT_MODELS = {
     "OpenAI": ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
-    "Gemini": ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-1.5-flash"],
-    "Groq": ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
+    "Gemini": ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"],
+    "Groq": ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+    "Nvidia": ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "google/gemma-3-12b-it", "mistralai/mistral-large-2-instruct"],
 }
-KEY_ENV = {"OpenAI": "OPENAI_API_KEY", "Gemini": "GEMINI_API_KEY", "Groq": "GROQ_API_KEY"}
+KEY_ENV = {
+    "OpenAI": ["OPENAI_API_KEY", "OPEN_API_KEY", "CHAT_API"],
+    "Gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+    "Groq": ["GROQ_API_KEY"],
+    "Nvidia": ["NIMA_API", "NIM_API", "NVIDIA_API_KEY"],
+    "Claude": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "ANTHROPIC_CLAUDE_API_KEY"],
+}
 
 
 class LLMClient:
@@ -28,7 +35,19 @@ class LLMClient:
     def __init__(self, model: str, api_key: Optional[str] = None, max_retries: int = 6,
                  max_output_tokens: int = 512):
         self.model = model
-        self.api_key = api_key or os.environ.get(KEY_ENV.get(self.provider, ""), "") or None
+        raw_key = api_key
+        if not raw_key:
+            env_vars = KEY_ENV.get(self.provider, [])
+            if isinstance(env_vars, str):
+                env_vars = [env_vars]
+            for var in env_vars:
+                val = os.environ.get(var)
+                if val:
+                    raw_key = val
+                    break
+        if raw_key and isinstance(raw_key, str):
+            raw_key = raw_key.strip().strip("'\"")
+        self.api_key = raw_key or None
         self.max_retries = max_retries
         self.max_output_tokens = max_output_tokens
         self.calls = 0
@@ -144,7 +163,34 @@ class GroqClient(LLMClient):
         return [i for i in ids if not any(s in i for s in ("whisper", "tts", "guard"))]
 
 
-CLIENTS = {"OpenAI": OpenAIClient, "Gemini": GeminiClient, "Groq": GroqClient}
+class NvidiaClient(LLMClient):
+    provider = "Nvidia"
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        from openai import OpenAI
+        self.client = OpenAI(api_key=self.api_key, base_url="https://integrate.api.nvidia.com/v1")
+
+    def _complete(self, text: str) -> str:
+        return self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": text}],
+            max_tokens=self.max_output_tokens,
+        ).choices[0].message.content or ""
+
+    def list_models(self) -> List[str]:
+        ids = sorted(m.id for m in self.client.models.list().data)
+        return [i for i in ids if not any(s in i for s in ("embed", "video", "safety", "parse", "clip", "qa"))]
+
+
+CLIENTS = {
+    "OpenAI": OpenAIClient,
+    "Gemini": GeminiClient,
+    "Groq": GroqClient,
+    "Claude": ClaudeClient,
+    "Nvidia": NvidiaClient,
+    "NIM": NvidiaClient,
+}
 
 
 def make_client(provider: str, model: str, api_key: Optional[str] = None) -> LLMClient:
